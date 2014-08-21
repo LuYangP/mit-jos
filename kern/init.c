@@ -24,7 +24,12 @@ i386_init(void)
 	// Can't call cprintf until after we do this!
 	cons_init();
 
+    //int x = 1, y = 3, z = 4;
+    //cprintf("x %d, y %x, z %d\n", x, y, z);
+    //unsigned int i = 0x00646c72;
+    //cprintf("H%x Wo%s", 57616, &i);
 	cprintf("6828 decimal is %o octal!\n", 6828);
+    cprintf("x=%d y=%d\n", 3);
 
 	// Lab 2 memory management initialization functions
 	mem_init();
