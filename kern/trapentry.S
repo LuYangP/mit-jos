@@ -47,9 +47,49 @@
  * Lab 3: Your code here for generating entry points for the different traps.
  */
 
+TRAPHANDLER_NOEC(handler0, 0);
+TRAPHANDLER_NOEC(handler1, 1);
+TRAPHANDLER_NOEC(handler2, 2);
+TRAPHANDLER_NOEC(handler3, 3);
+TRAPHANDLER_NOEC(handler4, 4);
+TRAPHANDLER_NOEC(handler5, 5);
+TRAPHANDLER_NOEC(handler6, 6);
+TRAPHANDLER_NOEC(handler7, 7);
+TRAPHANDLER(handler8, 8);
+TRAPHANDLER_NOEC(handler9, 9);
+TRAPHANDLER(handler10, 10);
+TRAPHANDLER(handler11, 11);
+TRAPHANDLER(handler12, 12);
+TRAPHANDLER(handler13, 13);
+TRAPHANDLER(handler14, 14);
+TRAPHANDLER_NOEC(handler16, 16);
 
+TRAPHANDLER_NOEC(handler48, 48);
 
 /*
  * Lab 3: Your code here for _alltraps
  */
+.globl _alltraps
+_alltraps:
+    # push values to make the stack look like a struct Trapframe
+    pushl %ds;
+    pushl %es;
+    pushal;
+    # load GD_KD into %ds and %es
+    movw $(GD_KD), %ax;
+    movw %ax, %ds;
+    movw %ax, %es;
+    # pushl %esp to pass a pointer to the Trapframe as an argument to trap()
+    pushl %esp;
+    # call trap (can trap ever return?)
+    call trap;
+    addl $4, %esp;
 
+    # Return falls through to trapret...
+.globl trapret
+trapret:
+    popal;
+    popl %es;
+    popl %ds;
+    addl $0x8, %esp; # trapno and errcode
+    iret;
