@@ -142,17 +142,19 @@ trap_init_percpu(void)
 
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
+	//ts.ts_esp0 = KSTACKTOP;
+	//ts.ts_ss0 = GD_KD;
+    thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - cpunum() * (KSTKSIZE + KSTKGAP);
+    thiscpu->cpu_ts.ts_ss0 = GD_KD; 
 
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
-					sizeof(struct Taskstate), 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+    gdt[(GD_TSS0 >> 3) + cpunum()] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),
+                        sizeof(struct Taskstate), 0);
+    gdt[(GD_TSS0 >> 3) + cpunum()].sd_s = 0;
 
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
+	ltr(GD_TSS0 + (cpunum() << 3));
 
 	// Load the IDT
 	lidt(&idt_pd);
@@ -278,6 +280,7 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+        lock_kernel();
 		assert(curenv);
 
 		// Garbage collect if current enviroment is a zombie
@@ -316,6 +319,7 @@ void
 page_fault_handler(struct Trapframe *tf)
 {
 	uint32_t fault_va;
+    static int count = 0;
 
 	// Read processor's CR2 register to find the faulting address
 	fault_va = rcr2();
@@ -358,6 +362,30 @@ page_fault_handler(struct Trapframe *tf)
 	//   (the 'tf' variable points at 'curenv->env_tf').
 
 	// LAB 4: Your code here.
+    if(curenv->env_pgfault_upcall) {
+        user_mem_assert(curenv, (void*)(UXSTACKTOP-PGSIZE), PGSIZE, PTE_W);
+        struct UTrapframe *utf;
+        uintptr_t stacktop = UXSTACKTOP;
+        if(tf->tf_esp >= UXSTACKTOP-PGSIZE && tf->tf_esp < UXSTACKTOP) {
+            stacktop = tf->tf_esp - sizeof(uintptr_t);
+            utf = (struct UTrapframe*)(stacktop - sizeof(struct UTrapframe));
+        }else {
+            utf = (struct UTrapframe*)(stacktop - sizeof(struct UTrapframe));
+        }
+        user_mem_assert(curenv, utf, sizeof(struct UTrapframe), PTE_W);
+
+        utf->utf_fault_va = fault_va;
+        utf->utf_err = tf->tf_err;
+        utf->utf_regs = tf->tf_regs;
+        utf->utf_eip = tf->tf_eip;
+        utf->utf_eflags = tf->tf_eflags;
+        utf->utf_esp = tf->tf_esp;
+        
+        tf->tf_esp = stacktop - sizeof(struct UTrapframe);
+        tf->tf_eip = (uintptr_t)(curenv->env_pgfault_upcall);
+        cprintf("tf->tf_esp: %x\n", tf->tf_esp);
+        env_run(curenv);
+    }
 
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",

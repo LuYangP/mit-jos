@@ -207,7 +207,7 @@ mem_init(void)
 	// Your code goes here:
     boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE,
         KSTKSIZE,
-        PADDR(bootstack), PTE_W | PTE_P);
+        PADDR(percpu_kstacks[0]), PTE_W | PTE_P);
 
 	//////////////////////////////////////////////////////////////////////
 	// Map all of physical memory at KERNBASE.
@@ -271,7 +271,12 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
-
+    int i;
+    uintptr_t kstacktop_i;
+    for(i = 1; i < NCPU; i++) {
+        kstacktop_i = KSTACKTOP - i * (KSTKSIZE + KSTKGAP);
+        boot_map_region(kern_pgdir, kstacktop_i-KSTKSIZE, KSTKSIZE, PADDR(percpu_kstacks[i]), PTE_P | PTE_W);
+    }
 }
 
 // --------------------------------------------------------------
@@ -314,12 +319,17 @@ page_init(void)
     // page_free_list = &pages[i];
     bool check_page_free(physaddr_t pa)
     {
-        if(pa == 0) return false;
-        else if(pa >= PGSIZE && pa < npages_basemem*PGSIZE) return true;
-        else if(pa >= IOPHYSMEM && pa < EXTPHYSMEM) return false;
-        else if(pa >= EXTPHYSMEM && pa < PADDR(&pages[npages+1]))\
+        if(pa == 0)
             return false;
-        else return true;
+        else if(pa >= ROUNDDOWN(MPENTRY_PADDR, PGSIZE) && pa <= ROUNDUP(MPENTRY_PADDR, PGSIZE))
+            return false;
+        else if(pa >= PGSIZE && pa < npages_basemem*PGSIZE) 
+            return true;
+        else if(pa >= IOPHYSMEM && pa < EXTPHYSMEM)
+            return false;
+        else if(pa >= EXTPHYSMEM && pa < PADDR(boot_alloc(0)))
+            return false;
+        return true;
     }
 
 
@@ -343,6 +353,7 @@ page_init(void)
             continue;
         }
 	}
+    (*tail).pp_link = NULL;
 }
 
 //
@@ -611,7 +622,15 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+
+    int perm = PTE_PCD | PTE_PWT | PTE_W;
+    boot_map_region(kern_pgdir, base, size, pa, perm);
+	uintptr_t newbase = base;
+    base = ROUNDUP(base+size, PGSIZE);
+    if(base >= MMIOLIM)
+        panic("mmio_map_region: base overflow MMIOLIM");
+    return (void*)newbase; 
+	//panic("mmio_map_region not implemented");
 }
 
 static uintptr_t user_mem_check_addr;
@@ -640,17 +659,18 @@ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 	// LAB 3: Your code here.
     char *a, *last; 
     a = (char*)ROUNDDOWN(va, PGSIZE);
-    last = (char*)ROUNDDOWN(va+len, PGSIZE) + 1;
+    last = (char*)ROUNDUP(va+len, PGSIZE);
     pte_t *pte_store;
     for(;;) {
         page_lookup(env->env_pgdir, a, &pte_store);
         if((uintptr_t)a >= ULIM || pte_store == NULL || ((uintptr_t)*pte_store&perm) == 0) {
+            cprintf("%d ,%d, %d\n", (uintptr_t)a >= ULIM, pte_store == NULL, ((uintptr_t)*pte_store&perm) == 0);
             user_mem_check_addr = (uintptr_t)va;
             return -E_FAULT;
         }
         a += PGSIZE;
         va = a;
-        if(a > last)
+        if(a >= last)
             break;
     }
 	return 0;
@@ -725,6 +745,7 @@ check_page_free_list(bool only_low_memory)
 		assert(page2pa(pp) != IOPHYSMEM);
 		assert(page2pa(pp) != EXTPHYSMEM - PGSIZE);
 		assert(page2pa(pp) != EXTPHYSMEM);
+        //cprintf("page2pa(pp): %x EXTPHYSMEM: %x page2kva(pp): %x first_free_page: %x\n", page2pa(pp), EXTPHYSMEM, page2kva(pp), first_free_page);
 		assert(page2pa(pp) < EXTPHYSMEM || (char *) page2kva(pp) >= first_free_page);
 		// (new test for lab 4)
 		assert(page2pa(pp) != MPENTRY_PADDR);
@@ -851,9 +872,10 @@ check_kern_pgdir(void)
 	// (updated in lab 4 to check per-CPU kernel stacks)
 	for (n = 0; n < NCPU; n++) {
 		uint32_t base = KSTACKTOP - (KSTKSIZE + KSTKGAP) * (n + 1);
-		for (i = 0; i < KSTKSIZE; i += PGSIZE)
+		for (i = 0; i < KSTKSIZE; i += PGSIZE) {
 			assert(check_va2pa(pgdir, base + KSTKGAP + i)
 				== PADDR(percpu_kstacks[n]) + i);
+        }
 		for (i = 0; i < KSTKGAP; i += PGSIZE)
 			assert(check_va2pa(pgdir, base + i) == ~0);
 	}

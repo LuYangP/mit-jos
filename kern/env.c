@@ -91,6 +91,7 @@ envid2env(envid_t envid, struct Env **env_store, bool checkperm)
 	e = &envs[ENVX(envid)];
 	if (e->env_status == ENV_FREE || e->env_id != envid) {
 		*env_store = 0;
+        cprintf("env_id wrong %d, %d, %d\n", e->env_status == ENV_FREE, e->env_id, envid); 
 		return -E_BAD_ENV;
 	}
 
@@ -552,6 +553,7 @@ env_run(struct Env *e)
     curenv->env_status = ENV_RUNNING;
     curenv->env_runs += 1;
     lcr3(PADDR(curenv->env_pgdir));
+    unlock_kernel();
     env_pop_tf(&curenv->env_tf);
 	//panic("env_run not yet implemented");
 }
